@@ -94,5 +94,18 @@ Note: You may need to set the environment variables before running the applicati
 
     *   Replace `"the_key_you_received"` with the actual key provided when storing the secret.
 
+## Certificate Generation
+To generate a self-signed certificate for HTTPS, run the following command:
+
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+```
+
+To trust the self-signed certificate on your machine, run the following command:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain cert.pem
+```
+
 ## License
 This project is licensed under the MIT License.

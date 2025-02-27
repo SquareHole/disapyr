@@ -8,6 +8,7 @@
 # Go workspace files
 *.test
 *.out
+*.pem
 
 # Vendor directory
 /vendor/

@@ -21,6 +21,9 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
+	httpsEnabledStr := os.Getenv("HTTPS_ENABLED")
+	httpsEnabled := httpsEnabledStr != "false"
+
 	// Retrieve database connection details from environment variables.
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
@@ -136,6 +139,11 @@ func main() {
 		return c.JSON(fiber.Map{"secret": secret})
 	})
 
-	// Start the Fiber app on port 3000.
-	log.Fatal(app.Listen(":3000"))
+	// Start the Fiber app.
+	port := ":3000"
+	if httpsEnabled {
+		log.Fatal(app.ListenTLS(port, "cert.pem", "key.pem"))
+	} else {
+		log.Fatal(app.Listen(port))
+	}
 }
