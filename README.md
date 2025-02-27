@@ -23,12 +23,21 @@ Disapyr is a web application that allows users to store a secret and generate a 
 
 2. Open your browser and navigate to `http://localhost:3000`.
 
-## License
+## Environment Variables
+The following environment variables are required to run the application:
+
+- `DB_USER`: Database username
+- `DB_PASSWORD`: Database password
+- `DB_HOST`: Database host
+- `DB_PORT`: Database port
+- `DB_NAME`: Database name
+- `ENC_KEY`: Encryption key
+- `KEY_LEN`: Key length
 
 ## API Endpoints
 
-### POST /store
-Stores a secret and returns a unique URL.
+### POST /secret
+Stores a secret and returns a unique key.
 
 **Request Body:**
 ```json
@@ -40,12 +49,12 @@ Stores a secret and returns a unique URL.
 **Response:**
 ```json
 {
-  "url": "http://localhost:3000/retrieve/unique_id"
+  "key": "unique_key"
 }
 ```
 
-### GET /retrieve/:id
-Retrieves the secret using the unique URL.
+### GET /secret/:key
+Retrieves the secret using the unique key.
 
 **Response:**
 ```json
@@ -53,4 +62,37 @@ Retrieves the secret using the unique URL.
   "secret": "your_secret_here"
 }
 ```
+
+## CLI Usage
+The CLI is the main application and can be built and run as follows:
+
+1. Build the application:
+   ```bash
+   go build -o disapyr cmd/main.go
+   ```
+
+2. Run the application:
+   ```bash
+   ./disapyr
+   ```
+
+Note: You may need to set the environment variables before running the application.
+
+### Usage Examples
+
+1.  **Store a secret:**
+
+    ```bash
+    ./disapyr -store -secret "your_secret_here"
+    ```
+
+2.  **Retrieve a secret:**
+
+    ```bash
+    ./disapyr -retrieve -key "the_key_you_received"
+    ```
+
+    *   Replace `"the_key_you_received"` with the actual key provided when storing the secret.
+
+## License
 This project is licensed under the MIT License.
