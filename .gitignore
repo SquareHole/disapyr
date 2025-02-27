@@ -1,0 +1,18 @@
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go workspace files
+*.test
+*.out
+
+# Vendor directory
+/vendor/
+
+# IDE files
+.idea/
+.vscode/
+.env
