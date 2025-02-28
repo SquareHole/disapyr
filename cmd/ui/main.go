@@ -7,46 +7,17 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 func main() {
-	// Handler for capturing a secret and generating a one-time link.
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			secret := r.FormValue("secret")
-			if secret != "" {
-				apiURL := "https://localhost:3000/secret"
-				jsonData := []byte(fmt.Sprintf(`{"secret":"%s"}`, secret))
+	app := fiber.New()
 
-				tr := &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				}
-				client := &http.Client{Transport: tr}
-				resp, err := client.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
-				if err != nil {
-					log.Printf("Error during API call: %v", err)
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-					return
-				}
-				defer resp.Body.Close()
-
-				var apiResponse struct {
-					Key string `json:"key"`
-				}
-				if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				// The external API returns a key which is used to build the one-time link.
-				url := fmt.Sprintf("https://localhost:3000/secret/%s", apiResponse.Key)
-				fmt.Fprintf(w, "<div>%s</div>", url)
-				return
-			}
-		}
-
-		// Serve the main page for capturing the secret.
-		fmt.Fprint(w, `
+	// GET handler to serve the main page for capturing the secret.
+	app.Get("/", func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "text/html; charset=utf-8")
+		return c.SendString(`
 <html>
 <head>
     <title>Secret Capture</title>
@@ -133,14 +104,44 @@ func main() {
     </div>
 </body>
 </html>
-`)
+		`)
 	})
 
-	// Handler for displaying a secret retrieved from the external API.
-	http.HandleFunc("/secret/", func(w http.ResponseWriter, r *http.Request) {
-		// Extract the key from the URL.
-		key := strings.TrimPrefix(r.URL.Path, "/secret/")
-		// Build the API URL to retrieve the secret.
+	// POST handler to capture the secret and generate the one-time link.
+	app.Post("/", func(c *fiber.Ctx) error {
+		secret := c.FormValue("secret")
+		if secret != "" {
+			apiURL := "https://localhost:3000/secret"
+			jsonData := []byte(fmt.Sprintf(`{"secret":"%s"}`, secret))
+
+			tr := &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			}
+			client := &http.Client{Transport: tr}
+			resp, err := client.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Printf("Error during API call: %v", err)
+				return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			}
+			defer resp.Body.Close()
+
+			var apiResponse struct {
+				Key string `json:"key"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+			}
+			// The external API returns a key which is used to build the one-time link.
+			url := fmt.Sprintf("https://localhost:3000/secret/%s", apiResponse.Key)
+			c.Set("Content-Type", "text/html; charset=utf-8")
+			return c.SendString(fmt.Sprintf("<div>%s</div>", url))
+		}
+		return c.SendString("No secret provided")
+	})
+
+	// GET handler for displaying a secret retrieved from the external API.
+	app.Get("/secret/:key", func(c *fiber.Ctx) error {
+		key := c.Params("key")
 		apiURL := fmt.Sprintf("https://localhost:3000/secret/%s", key)
 
 		tr := &http.Transport{
@@ -150,35 +151,32 @@ func main() {
 		resp, err := client.Get(apiURL)
 		if err != nil {
 			log.Printf("Error during API GET call: %v", err)
-			displaySecretPage(w, "Error retrieving secret")
-			return
+			return displaySecretPage(c, "Error retrieving secret")
 		}
 		defer resp.Body.Close()
 
 		// If the API returns a non-200 status, display a message in the readonly textbox.
 		if resp.StatusCode != http.StatusOK {
 			message := "Secret not found. It may have already been retrieved."
-			displaySecretPage(w, message)
-			return
+			return displaySecretPage(c, message)
 		}
 
 		var apiResponse struct {
 			Secret string `json:"secret"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 		}
 
-		displaySecretPage(w, apiResponse.Secret)
+		return displaySecretPage(c, apiResponse.Secret)
 	})
 
 	fmt.Println("Starting server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(app.Listen(":8080"))
 }
 
 // displaySecretPage renders an HTML page with a read-only textarea containing the provided content.
-func displaySecretPage(w http.ResponseWriter, content string) {
+func displaySecretPage(c *fiber.Ctx, content string) error {
 	html := fmt.Sprintf(`
 <html>
 <head>
@@ -206,5 +204,6 @@ func displaySecretPage(w http.ResponseWriter, content string) {
 </body>
 </html>
 `, content)
-	fmt.Fprint(w, html)
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	return c.SendString(html)
 }
