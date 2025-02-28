@@ -33,6 +33,8 @@ The following environment variables are required to run the application:
 - `DB_NAME`: Database name
 - `ENC_KEY`: Encryption key
 - `KEY_LEN`: Key length
+- `CERT_PATH`: Path to the certificate file
+- `KEY_PATH`: Path to the key file
 
 ## API Endpoints
 
