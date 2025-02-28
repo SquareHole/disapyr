@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/squarehole/disapyr/internal"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -20,6 +21,20 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
+
+	// Retrieve rate limit from environment variable.
+	rateLimitStr := os.Getenv("RATE_LIMIT")
+	rateLimit := 10 // Default to 10 requests per second.
+	if rateLimitStr != "" {
+		var err error
+		rateLimit, err = strconv.Atoi(rateLimitStr)
+		if err != nil {
+			log.Fatal("Invalid RATE_LIMIT value:", err)
+		}
+	}
+
+	// Create a rate limiter.
+	Limiter := createRateLimiter(rateLimit)
 
 	httpsEnabledStr := os.Getenv("HTTPS_ENABLED")
 	httpsEnabled := httpsEnabledStr != "false"
@@ -68,6 +83,11 @@ func main() {
 
 	// Endpoint to store a secret.
 	app.Post("/secret", func(c *fiber.Ctx) error {
+		// Limit the number of requests.
+		if !Limiter.Allow() {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
+		}
+
 		type RequestBody struct {
 			Secret string `json:"secret"`
 		}
@@ -100,6 +120,11 @@ func main() {
 
 	// Endpoint to retrieve a secret exactly once.
 	app.Get("/secret/:key", func(c *fiber.Ctx) error {
+		// Limit the number of requests.
+		if !Limiter.Allow() {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
+		}
+
 		key := c.Params("key")
 
 		// Start a transaction to ensure atomic read-update.
@@ -146,4 +171,8 @@ func main() {
 	} else {
 		log.Fatal(app.Listen(port))
 	}
+}
+
+func createRateLimiter(rateLimit int) *rate.Limiter {
+	return rate.NewLimiter(rate.Limit(rateLimit), 2*rateLimit)
 }
