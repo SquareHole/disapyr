@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -9,6 +10,28 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/squarehole/disapyr/internal"
 )
+
+func getCertKeyPaths() (string, string, error) {
+	httpsEnabled := os.Getenv("HTTPS_ENABLED") != "false"
+	certPath := os.Getenv("CERT_PATH")
+	keyPath := os.Getenv("KEY_PATH")
+
+	if httpsEnabled {
+		if certPath == "" || keyPath == "" {
+			return "", "", fmt.Errorf("CERT_PATH and KEY_PATH must be set when HTTPS_ENABLED is true")
+		}
+
+		if _, err := os.Stat(certPath); os.IsNotExist(err) {
+			return "", "", fmt.Errorf("CERT_PATH file does not exist: %s", certPath)
+		}
+
+		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+			return "", "", fmt.Errorf("KEY_PATH file does not exist: %s", keyPath)
+		}
+	}
+
+	return certPath, keyPath, nil
+}
 
 func main() {
 	// Load environment variables from .env file.
@@ -44,8 +67,13 @@ func main() {
 
 	// Start the Fiber app.
 	port := ":3000"
+	certPath, keyPath, err := getCertKeyPaths()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if os.Getenv("HTTPS_ENABLED") != "false" {
-		log.Fatal(app.ListenTLS(port, "cert.pem", "key.pem"))
+		log.Fatal(app.ListenTLS(port, certPath, keyPath))
 	} else {
 		log.Fatal(app.Listen(port))
 	}
