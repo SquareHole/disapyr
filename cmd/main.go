@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -46,7 +47,14 @@ func main() {
 			os.Exit(1)
 		}
 
-		resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+		client := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+		resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 		if err != nil {
 			fmt.Println("Error calling API:", err)
 			os.Exit(1)
