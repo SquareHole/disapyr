@@ -16,7 +16,7 @@ func main() {
 	retrieveCmd := flag.Bool("retrieve", false, "Retrieve a secret")
 	secretVal := flag.String("secret", "", "Secret to store (use with --store)")
 	keyVal := flag.String("key", "", "Key to retrieve the secret (use with --retrieve)")
-	server := flag.String("server", "http://localhost:3000", "API server URL (default: http://localhost:3000)")
+	server := flag.String("server", "https://localhost:3000", "API server URL (default: https://localhost:3000)")
 	flag.Parse()
 
 	// Ensure that either store or retrieve is selected, but not both.
