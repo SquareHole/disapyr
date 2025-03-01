@@ -46,14 +46,15 @@ func main() {
 			fmt.Println("Error marshalling JSON:", err)
 			os.Exit(1)
 		}
-
-		client := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-			},
+		var tr *http.Transport
+		if os.Getenv("GO_ENV") != "production" {
+			tr = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Bypass TLS verification
+			}
+		} else {
+			tr = &http.Transport{}
 		}
+		client := &http.Client{Transport: tr}
 		resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 		if err != nil {
 			fmt.Println("Error calling API:", err)
