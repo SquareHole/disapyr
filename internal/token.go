@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +17,11 @@ func GetAccessToken() (string, error) {
 	if err := godotenv.Load(); err != nil {
 		return "", fmt.Errorf("error loading .env file: %w", err)
 	}
-	url := os.Getenv("URL")
+	urlEnv := os.Getenv("URL")
+	if urlEnv == "" {
+		return "", fmt.Errorf("environment variable URL is not set")
+	}
+	url := fmt.Sprintf("https://%s/oauth/token", urlEnv)
 
 	payload := strings.NewReader(fmt.Sprintf("{\"client_id\":\"%s\",\"client_secret\":\"%s\",\"audience\":\"%s\",\"grant_type\":\"%s\"}",
 		os.Getenv("CLIENT_ID"),
@@ -40,5 +45,15 @@ func GetAccessToken() (string, error) {
 		return "", fmt.Errorf("error reading response body: %w", err)
 	}
 
-	return string(body), nil
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("error unmarshalling response body: %w", err)
+	}
+
+	accessToken, ok := result["access_token"].(string)
+	if !ok {
+		return "", fmt.Errorf("access_token not found in response body")
+	}
+
+	return accessToken, nil
 }

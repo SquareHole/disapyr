@@ -78,8 +78,6 @@ func main() {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 
-			log.Panicf("Request Headers: %v", accessToken)
-
 			log.Printf("Making API call")
 			resp, err := client.Do(req)
 			if err != nil {

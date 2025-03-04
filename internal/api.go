@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -27,33 +28,50 @@ import (
 
 var handler = func(c *fiber.Ctx) error {
 	log.Printf("Handler called")
-	token := c.Get("Authorization")
-	if token == "" {
-		log.Fatal("missing token")
+
+	// Get the token from the Authorization header.
+	tokenString := c.Get("Authorization")
+	if tokenString == "" {
+		log.Print("missing token")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})
 	}
 
-	// Validate the token with Auth0 and handle errors
-	// Replace YOUR_AUTH0_DOMAIN and YOUR_AUTH0_AUDIENCE with your Auth0 domain and audience
+	// Trim and remove "Bearer " prefix (case-insensitive) if present.
+	tokenString = strings.TrimSpace(tokenString)
+	if strings.HasPrefix(strings.ToLower(tokenString), "bearer ") {
+		tokenString = tokenString[len("Bearer "):]
+	}
+
+	// Validate the token with Auth0.
 	auth0Domain := os.Getenv("URL")
+	if auth0Domain == "" {
+		log.Print("Auth0 domain not set")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Auth0 domain not configured"})
+	}
 	log.Printf("Auth0 domain: %s", auth0Domain)
-	//auth0Audience := os.Getenv("AUDIENCE")
 	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", auth0Domain)
 
-	// Parse and validate the JWT token
-	parsedToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+	parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Verify the signing method is RSA.
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			log.Printf("unexpected signing method: %v", token.Header["alg"])
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 
-		// Fetch the JWKS
+		// Fetch the JWKS.
 		resp, err := http.Get(jwksURL)
 		if err != nil {
 			log.Printf("failed to fetch JWKS: %v", err)
 			return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 		}
 		defer resp.Body.Close()
+
+		// Check if the status code is OK.
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			log.Printf("failed to fetch JWKS, status %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("failed to fetch JWKS, status %d", resp.StatusCode)
+		}
 
 		var jwks struct {
 			Keys []json.RawMessage `json:"keys"`
@@ -63,7 +81,7 @@ var handler = func(c *fiber.Ctx) error {
 			return nil, fmt.Errorf("failed to decode JWKS: %w", err)
 		}
 
-		// Find the key with the matching kid
+		// Look for a key that matches the token's "kid" header.
 		for _, key := range jwks.Keys {
 			var k struct {
 				Kid string `json:"kid"`
@@ -94,15 +112,16 @@ var handler = func(c *fiber.Ctx) error {
 				}, nil
 			}
 		}
-		log.Printf("no matching key found")
+		log.Print("no matching key found")
 		return nil, fmt.Errorf("no matching key found")
 	})
 
 	if err != nil || !parsedToken.Valid {
+		log.Printf("invalid token: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
-	// Token is valid, proceed to the next handler
+	// Token is valid; proceed to the next handler.
 	return c.Next()
 }
 
