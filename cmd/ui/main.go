@@ -23,7 +23,9 @@ func main() {
 		log.Fatalf("Error loading .env file")
 	}
 
-	// Load HTML templates
+	// Serve static files
+	app.Static("/cmd/ui", "./cmd/ui")
+
 	captureSecretHTML, err := os.ReadFile("cmd/ui/capture_secret.html")
 	if err != nil {
 		log.Fatalf("Error reading capture_secret.html: %v", err)
