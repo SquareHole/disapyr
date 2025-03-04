@@ -2,7 +2,7 @@
 
 /* Apply Roboto font */
 body {
-    font-family: 'Roboto', sans-serif;
+    font-family: 'Bitter', sans-serif;
 }
 
 /* Basic body styling */
@@ -53,3 +53,10 @@ body {
     color: #6c757d;
     text-decoration: underline;
 }
+
+.colored-container {
+    background-color: #a2adb7; /* Light grey background */
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  }
