@@ -252,7 +252,11 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to start transaction"})
 		}
-		defer tx.Rollback()
+		defer func() {
+			if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+				log.Printf("failed to rollback transaction: %v", err)
+			}
+		}()
 
 		var secret string
 		var retrievedAt *time.Time
