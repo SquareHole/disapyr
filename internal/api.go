@@ -4,10 +4,17 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/rsa"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"math/big"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,7 +22,108 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/mr-tron/base58"
 	"golang.org/x/time/rate"
+
+	"github.com/dgrijalva/jwt-go"
 )
+
+var handler = func(c *fiber.Ctx) error {
+	log.Printf("Handler called")
+
+	// Get the token from the Authorization header.
+	tokenString := c.Get("Authorization")
+	if tokenString == "" {
+		log.Print("missing token")
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})
+	}
+
+	// Trim and remove "Bearer " prefix (case-insensitive) if present.
+	tokenString = strings.TrimSpace(tokenString)
+	if strings.HasPrefix(strings.ToLower(tokenString), "bearer ") {
+		tokenString = tokenString[len("Bearer "):]
+	}
+
+	// Validate the token with Auth0.
+	auth0Domain := os.Getenv("URL")
+	if auth0Domain == "" {
+		log.Print("Auth0 domain not set")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Auth0 domain not configured"})
+	}
+	log.Printf("Auth0 domain: %s", auth0Domain)
+	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", auth0Domain)
+
+	parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Verify the signing method is RSA.
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+			log.Printf("unexpected signing method: %v", token.Header["alg"])
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+
+		// Fetch the JWKS.
+		resp, err := http.Get(jwksURL)
+		if err != nil {
+			log.Printf("failed to fetch JWKS: %v", err)
+			return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
+		}
+		defer resp.Body.Close()
+
+		// Check if the status code is OK.
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			log.Printf("failed to fetch JWKS, status %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("failed to fetch JWKS, status %d", resp.StatusCode)
+		}
+
+		var jwks struct {
+			Keys []json.RawMessage `json:"keys"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+			log.Printf("failed to decode JWKS: %v", err)
+			return nil, fmt.Errorf("failed to decode JWKS: %w", err)
+		}
+
+		// Look for a key that matches the token's "kid" header.
+		for _, key := range jwks.Keys {
+			var k struct {
+				Kid string `json:"kid"`
+				N   string `json:"n"`
+				E   string `json:"e"`
+			}
+			if err := json.Unmarshal(key, &k); err != nil {
+				continue
+			}
+			if k.Kid == token.Header["kid"] {
+				nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
+				if err != nil {
+					log.Printf("failed to decode N: %v", err)
+					return nil, fmt.Errorf("failed to decode N: %w", err)
+				}
+				eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
+				if err != nil {
+					log.Printf("failed to decode E: %v", err)
+					return nil, fmt.Errorf("failed to decode E: %w", err)
+				}
+				e := 0
+				for _, b := range eBytes {
+					e = e*256 + int(b)
+				}
+				return &rsa.PublicKey{
+					N: new(big.Int).SetBytes(nBytes),
+					E: e,
+				}, nil
+			}
+		}
+		log.Print("no matching key found")
+		return nil, fmt.Errorf("no matching key found")
+	})
+
+	if err != nil || !parsedToken.Valid {
+		log.Printf("invalid token: %v", err)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
+	}
+
+	// Token is valid; proceed to the next handler.
+	return c.Next()
+}
 
 // HideIdentifier encrypts the provided identifier using AES-GCM,
 // prepends the nonce, and returns a Base58-encoded string.
@@ -89,10 +197,14 @@ func CreateRateLimiter(rateLimit int) *rate.Limiter {
 }
 
 func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey string, keyLen int) {
+
+	log.Printf("registering routes")
 	// Endpoint to store a secret.
-	app.Post("/secret", func(c *fiber.Ctx) error {
+	app.Post("/secret", handler, func(c *fiber.Ctx) error {
+		log.Printf("New secret request from %s", c.IP())
 		// Limit the number of requests.
 		if !limiter.Allow() {
+			log.Printf("Too many requests from %v, limit: %v", c.IP(), limiter.Limit())
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
 		}
 
@@ -127,7 +239,7 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 	})
 
 	// Endpoint to retrieve a secret exactly once.
-	app.Get("/secret/:key", func(c *fiber.Ctx) error {
+	app.Get("/secret/:key", handler, func(c *fiber.Ctx) error {
 		// Limit the number of requests.
 		if !limiter.Allow() {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
@@ -140,7 +252,11 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to start transaction"})
 		}
-		defer tx.Rollback()
+		defer func() {
+			if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+				log.Printf("failed to rollback transaction: %v", err)
+			}
+		}()
 
 		var secret string
 		var retrievedAt *time.Time

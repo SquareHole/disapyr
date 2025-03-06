@@ -1,0 +1,62 @@
+/* Common CSS styles for capture_secret.html and display_secret.html */
+
+/* Apply Roboto font */
+body {
+    font-family: 'Bitter', sans-serif;
+}
+
+/* Basic body styling */
+body {
+    background-color: #f8f9fa; /* Light gray background */
+    margin: 0;
+    padding: 0;
+}
+
+/* Top navbar styling */
+.navbar {
+    background-color: #090909; /* Top bar color */
+}
+.navbar-brand {
+    color: #fff !important;
+}
+
+/* Container styling */
+.container {
+    min-height: 250px; /* Reserve space for overlapping elements */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Button styling */
+.btn-generate {
+    background-color: #28a745; /* Bootstrap “success” green */
+    color: #fff;
+    border: none;
+}
+.btn-generate:hover {
+    background-color: #218838;
+}
+
+/* Textarea styling */
+#secret {
+    resize: none;
+    width: 100%; /* Full width */
+}
+
+/* Privacy note styling */
+.privacy-text {
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+.privacy-text a {
+    color: #6c757d;
+    text-decoration: underline;
+}
+
+.colored-container {
+    background-color: #a2adb7; /* Light grey background */
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  }

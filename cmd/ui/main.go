@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
+	"github.com/squarehole/disapyr/internal"
 )
 
 func main() {
@@ -22,7 +23,9 @@ func main() {
 		log.Fatalf("Error loading .env file")
 	}
 
-	// Load HTML templates
+	// Serve static files
+	app.Static("/cmd/ui", "./cmd/ui")
+
 	captureSecretHTML, err := os.ReadFile("cmd/ui/capture_secret.html")
 	if err != nil {
 		log.Fatalf("Error reading capture_secret.html: %v", err)
@@ -32,18 +35,30 @@ func main() {
 	baseURL := os.Getenv("BASE_URL")
 	uiHostPort := os.Getenv("UI_HOST_PORT")
 
+	// Get the access token from the external API
+	log.Println("Getting access token...")
+	accessToken, err := internal.GetAccessToken()
+	if err != nil {
+		fmt.Println("Error getting access token:", err)
+		return
+	}
+
 	// GET handler to serve the main page for capturing the secret.
 	app.Get("/", func(c *fiber.Ctx) error {
+		log.Printf("Serving capture_secret.html")
 		c.Set("Content-Type", "text/html; charset=utf-8")
 		return c.SendString(string(captureSecretHTML))
 	})
 
 	// POST handler to capture the secret and generate the one-time link.
 	app.Post("/", func(c *fiber.Ctx) error {
+		log.Printf("POST /")
 		secret := c.FormValue("secret")
+
 		if secret != "" {
+			log.Println("Secret provided")
 			apiURL := fmt.Sprintf("%s/secret", baseURL)
-			fmt.Printf("API URL: %s\n", apiURL)
+			log.Printf("API URL: %s\n", apiURL)
 			jsonData := []byte(fmt.Sprintf(`{"secret":"%s"}`, secret))
 
 			var tr *http.Transport
@@ -54,8 +69,19 @@ func main() {
 			} else {
 				tr = &http.Transport{}
 			}
+
+			log.Print("Creating new HTTP client")
 			client := &http.Client{Transport: tr}
-			resp, err := client.Post(apiURL, "application/json", bytes.NewBuffer(jsonData))
+			req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
+			if err != nil {
+				log.Printf("Error creating new request: %v", err)
+				return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+
+			log.Printf("Making API call")
+			resp, err := client.Do(req)
 			if err != nil {
 				log.Printf("Error during API call: %v", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
@@ -66,6 +92,7 @@ func main() {
 				Key string `json:"key"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+				log.Printf("Error decoding API response: %v", err)
 				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 			}
 
@@ -95,7 +122,14 @@ func main() {
 
 		client := &http.Client{Transport: tr}
 
-		resp, err := client.Get(apiURL)
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			log.Printf("Error creating new request: %v", err)
+			return displaySecretPage(c, "Error retrieving secret")
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+
+		resp, err := client.Do(req)
 		if err != nil {
 			log.Printf("Error during API GET call: %v", err)
 			return displaySecretPage(c, "Error retrieving secret")

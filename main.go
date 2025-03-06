@@ -17,6 +17,7 @@ func getCertKeyPaths() (string, string, error) {
 	keyPath := os.Getenv("KEY_PATH")
 
 	if httpsEnabled {
+		log.Println("HTTPS enabled")
 		if certPath == "" || keyPath == "" {
 			return "", "", fmt.Errorf("CERT_PATH and KEY_PATH must be set when HTTPS_ENABLED is true")
 		}
@@ -66,12 +67,13 @@ func main() {
 	internal.RegisterRoutes(app, db, limiter, os.Getenv("ENC_KEY"), 32) // Assuming keyLen is 32
 
 	// Start the Fiber app.
-	port := ":3000"
+	port := ":8080"
 	certPath, keyPath, err := getCertKeyPaths()
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	log.Printf("Starting API server on port %s...\n", port)
 	if os.Getenv("HTTPS_ENABLED") != "false" {
 		log.Fatal(app.ListenTLS(port, certPath, keyPath))
 	} else {
