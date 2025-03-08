@@ -26,15 +26,24 @@ Disapyr is a web application that allows users to store a secret and generate a 
 ## Environment Variables
 The following environment variables are required to run the application:
 
+- `CLIENT_ID`: Client ID for external authentication
+- `CLIENT_SECRET`: Client secret for external authentication
+- `AUDIENCE`: Intended audience for tokens
+- `GRANT_TYPE`: Grant type for authentication
 - `DB_USER`: Database username
 - `DB_PASSWORD`: Database password
 - `DB_HOST`: Database host
 - `DB_PORT`: Database port
 - `DB_NAME`: Database name
 - `ENC_KEY`: Encryption key
-- `KEY_LEN`: Key length
+- `KEY_LEN`: Key length for encryption
+- `RATE_LIMIT`: Maximum requests allowed
 - `CERT_PATH`: Path to the certificate file
 - `KEY_PATH`: Path to the key file
+- `BASE_URL`: Base URL for the application
+- `URL`: Domain URL for authentication
+- `UI_HOST_PORT`: Port for the UI host
+- `DB_USESSL`: Enable SSL for the database connection
 
 ## API Endpoints
 
