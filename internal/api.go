@@ -163,13 +163,18 @@ func NewDatabaseConnection() (*sql.DB, error) {
 	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
+	dbUseSSL := os.Getenv("DB_USESSL")
+	sslMode := "disable"
+	if strings.ToLower(dbUseSSL) == "true" {
+		sslMode = "require"
+	}
 
 	// Build the PostgreSQL connection string.
 	var connStr string
 	if dbPassword != "" {
-		connStr = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", dbUser, dbPassword, dbHost, dbPort, dbName)
+		connStr = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", dbUser, dbPassword, dbHost, dbPort, dbName, sslMode)
 	} else {
-		connStr = fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=disable", dbUser, dbHost, dbPort, dbName)
+		connStr = fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=%s", dbUser, dbHost, dbPort, dbName, sslMode)
 	}
 
 	db, err := sql.Open("postgres", connStr)
