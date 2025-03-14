@@ -18,12 +18,11 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/mr-tron/base58"
 	"golang.org/x/time/rate"
-
-	"github.com/dgrijalva/jwt-go"
 )
 
 var handler = func(c *fiber.Ctx) error {
@@ -116,8 +115,14 @@ var handler = func(c *fiber.Ctx) error {
 		return nil, fmt.Errorf("no matching key found")
 	})
 
-	if err != nil || !parsedToken.Valid {
+	if err != nil {
 		log.Printf("invalid token: %v", err)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
+	}
+
+	// In jwt/v5 we need to explicitly check claims validity
+	if !parsedToken.Valid {
+		log.Printf("token validation failed")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
