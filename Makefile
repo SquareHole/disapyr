@@ -1,22 +1,39 @@
 BIN=go
 OUTPATH=./bin
 
-.PHONY: build test watch-test bench watch-bench coverage tools lint lint-fix audit outdated weight latest proto-all
-build: create_build_folder copy_env
+
+.PHONY: build test watch-test bench watch-bench coverage tools lint lint-fix audit outdated weight latest proto-all copy_html
+build: create_build_folder copy_env copy_html
 	${BIN} build -v -o ${OUTPATH} ./...
 
 create_build_folder:
-	mkdir -p bin
+	@if [ -d "${OUTPATH}" ]; then find "${OUTPATH}" -mindepth 1 -delete; fi
+	@if [ ! -d "${OUTPATH}" ]; then mkdir -p "${OUTPATH}"; fi
 
 copy_env:
 	@envfile=$$(find . -name ".env" -print -quit); \
+	echo "Found .env file at $${envfile}"; \
 	if [ -f "$${envfile}" ] && [ -f "${OUTPATH}/.env" ]; then \
+		echo "Removing existing .env file from ${OUTPATH}"; \
 		rm -f "${OUTPATH}/.env" || exit 1; \
 	fi; \
 	if [ -f "$${envfile}" ]; then \
+		echo "Copying .env file from $${envfile} to ${OUTPATH}"; \
 		cp -f "$${envfile}" "${OUTPATH}/" || exit 1; \
+	else \
+		echo "No .env file found to copy"; \
 	fi
 
+copy_html:
+	@htmlfiles=$$(find . -name "*.html"); \
+	if [ -z "$${htmlfiles}" ]; then \
+		echo "No .html files found to copy"; \
+	else \
+		for htmlfile in $${htmlfiles}; do \
+			echo "Copying $${htmlfile} to ${OUTPATH}"; \
+			cp -f "$${htmlfile}" "${OUTPATH}/" || exit 1; \
+		done; \
+	fi
 
 test:
 	go test -race -v ./...

@@ -23,10 +23,17 @@ func main() {
 		log.Fatalf("Error loading .env file")
 	}
 
-	// Serve static files
-	app.Static("/cmd/ui", "./cmd/ui")
+	root, err := os.OpenRoot("./")
+	if err != nil {
+		log.Fatalf("Error opening root: %v", err)
+	}
 
-	captureSecretHTML, err := os.ReadFile("cmd/ui/capture_secret.html")
+	defer root.Close()
+
+	// Serve static files
+	app.Static(".", root.Name())
+
+	captureSecretHTML, err := os.ReadFile("capture_secret.html")
 	if err != nil {
 		log.Fatalf("Error reading capture_secret.html: %v", err)
 	}
@@ -159,7 +166,7 @@ func main() {
 // displaySecretPage renders an HTML page with a read-only textarea containing the provided content.
 func displaySecretPage(c *fiber.Ctx, content string) error {
 
-	displaySecretHTML, err := os.ReadFile("cmd/ui/display_secret.html")
+	displaySecretHTML, err := os.ReadFile("display_secret.html")
 	if err != nil {
 		log.Fatalf("Error reading display_secret.html: %v", err)
 	}
