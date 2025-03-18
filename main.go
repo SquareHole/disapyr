@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strconv"
+	"time"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
@@ -17,7 +19,7 @@ func getCertKeyPaths() (string, string, error) {
 	keyPath := os.Getenv("KEY_PATH")
 
 	if httpsEnabled {
-		log.Println("HTTPS enabled")
+		log.Info("HTTPS enabled")
 		if certPath == "" || keyPath == "" {
 			return "", "", fmt.Errorf("CERT_PATH and KEY_PATH must be set when HTTPS_ENABLED is true")
 		}
@@ -35,6 +37,19 @@ func getCertKeyPaths() (string, string, error) {
 }
 
 func main() {
+
+	logger := log.NewWithOptions(os.Stderr, log.Options{
+		ReportCaller:    true,
+		ReportTimestamp: true,
+		TimeFormat:      time.RFC3339Nano,
+		Level:           log.DebugLevel,
+		Formatter:       log.JSONFormatter,
+	})
+
+	log.SetDefault(logger)
+
+	log.Debug("Starting API server...", "time", time.Now())
+
 	// Load environment variables from .env file.
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
@@ -47,7 +62,7 @@ func main() {
 		var err error
 		rateLimit, err = strconv.Atoi(rateLimitStr)
 		if err != nil {
-			log.Fatal("Invalid RATE_LIMIT value:", err)
+			log.Fatal("Invalid RATE_LIMIT value: %v", err)
 		}
 	}
 
@@ -73,7 +88,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("Starting API server on port %s...\n", port)
+	log.Infof("Starting API server on port %s...", port)
 	if os.Getenv("HTTPS_ENABLED") != "false" {
 		log.Fatal(app.ListenTLS(port, certPath, keyPath))
 	} else {

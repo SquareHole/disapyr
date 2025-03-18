@@ -10,12 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
@@ -26,12 +27,12 @@ import (
 )
 
 var handler = func(c *fiber.Ctx) error {
-	log.Printf("Handler called")
+	log.Info("Handler called")
 
 	// Get the token from the Authorization header.
 	tokenString := c.Get("Authorization")
 	if tokenString == "" {
-		log.Print("missing token")
+		log.Warn("missing token")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})
 	}
 
@@ -44,23 +45,23 @@ var handler = func(c *fiber.Ctx) error {
 	// Validate the token with Auth0.
 	auth0Domain := os.Getenv("URL")
 	if auth0Domain == "" {
-		log.Print("Auth0 domain not set")
+		log.Warn("Auth0 domain not set")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Auth0 domain not configured"})
 	}
-	log.Printf("Auth0 domain: %s", auth0Domain)
+	log.Infof("Auth0 domain: %s", auth0Domain)
 	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", auth0Domain)
 
 	parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Verify the signing method is RSA.
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			log.Printf("unexpected signing method: %v", token.Header["alg"])
+			log.Warnf("unexpected signing method: %v", token.Header["alg"])
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 
 		// Fetch the JWKS.
 		resp, err := http.Get(jwksURL)
 		if err != nil {
-			log.Printf("failed to fetch JWKS: %v", err)
+			log.Errorf("failed to fetch JWKS: %v", err)
 			return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 		}
 		defer resp.Body.Close()
@@ -68,7 +69,7 @@ var handler = func(c *fiber.Ctx) error {
 		// Check if the status code is OK.
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
-			log.Printf("failed to fetch JWKS, status %d: %s", resp.StatusCode, string(body))
+			log.Errorf("failed to fetch JWKS, status %d: %s", resp.StatusCode, string(body))
 			return nil, fmt.Errorf("failed to fetch JWKS, status %d", resp.StatusCode)
 		}
 
@@ -76,7 +77,7 @@ var handler = func(c *fiber.Ctx) error {
 			Keys []json.RawMessage `json:"keys"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-			log.Printf("failed to decode JWKS: %v", err)
+			log.Errorf("failed to decode JWKS: %v", err)
 			return nil, fmt.Errorf("failed to decode JWKS: %w", err)
 		}
 
@@ -93,12 +94,12 @@ var handler = func(c *fiber.Ctx) error {
 			if k.Kid == token.Header["kid"] {
 				nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
 				if err != nil {
-					log.Printf("failed to decode N: %v", err)
+					log.Errorf("failed to decode N: %v", err)
 					return nil, fmt.Errorf("failed to decode N: %w", err)
 				}
 				eBytes, err := base64.RawURLEncoding.DecodeString(k.E)
 				if err != nil {
-					log.Printf("failed to decode E: %v", err)
+					log.Errorf("failed to decode E: %v", err)
 					return nil, fmt.Errorf("failed to decode E: %w", err)
 				}
 				e := 0
@@ -111,18 +112,18 @@ var handler = func(c *fiber.Ctx) error {
 				}, nil
 			}
 		}
-		log.Print("no matching key found")
+		log.Warn("no matching key found")
 		return nil, fmt.Errorf("no matching key found")
 	})
 
 	if err != nil {
-		log.Printf("invalid token: %v", err)
+		log.Errorf("invalid token: %v", err)
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
 	// In jwt/v5 we need to explicitly check claims validity
 	if !parsedToken.Valid {
-		log.Printf("token validation failed")
+		log.Warn("token validation failed")
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
@@ -208,13 +209,13 @@ func CreateRateLimiter(rateLimit int) *rate.Limiter {
 
 func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey string, keyLen int) {
 
-	log.Printf("registering routes")
+	log.Info("registering routes")
 	// Endpoint to store a secret.
 	app.Post("/secret", handler, func(c *fiber.Ctx) error {
-		log.Printf("New secret request from %s", c.IP())
+		log.Infof("New secret request from %s", c.IP())
 		// Limit the number of requests.
 		if !limiter.Allow() {
-			log.Printf("Too many requests from %v, limit: %v", c.IP(), limiter.Limit())
+			log.Warnf("Too many requests from %v, limit: %v", c.IP(), limiter.Limit())
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
 		}
 
