@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"time"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/joho/godotenv"
@@ -15,17 +17,28 @@ import (
 )
 
 func main() {
+
+	logger := log.NewWithOptions(os.Stderr, log.Options{
+		ReportCaller:    true,
+		ReportTimestamp: true,
+		TimeFormat:      time.RFC3339Nano,
+		Level:           log.DebugLevel,
+		Formatter:       log.JSONFormatter,
+	})
+
+	log.SetDefault(logger)
+
 	app := fiber.New()
 
 	// Load environment variables from .env file
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatalf("Error loading .env file")
+		log.Fatal("Error loading .env file")
 	}
 
 	root, err := os.OpenRoot("./")
 	if err != nil {
-		log.Fatalf("Error opening root: %v", err)
+		log.Fatal("Error opening root:", "err", err)
 	}
 
 	defer root.Close()
@@ -35,7 +48,7 @@ func main() {
 
 	captureSecretHTML, err := os.ReadFile("capture_secret.html")
 	if err != nil {
-		log.Fatalf("Error reading capture_secret.html: %v", err)
+		log.Fatal("Error reading capture_secret.html: %v", err)
 	}
 
 	// Load BASE_URL from environment variables
@@ -43,29 +56,29 @@ func main() {
 	uiHostPort := os.Getenv("UI_HOST_PORT")
 
 	// Get the access token from the external API
-	log.Println("Getting access token...")
+	log.Info("Getting access token...")
 	accessToken, err := internal.GetAccessToken()
 	if err != nil {
-		fmt.Println("Error getting access token:", err)
+		log.Error("Error getting access token:", "err", err)
 		return
 	}
 
 	// GET handler to serve the main page for capturing the secret.
 	app.Get("/", func(c *fiber.Ctx) error {
-		log.Printf("Serving capture_secret.html")
+		log.Info("Serving capture_secret.html")
 		c.Set("Content-Type", "text/html; charset=utf-8")
 		return c.SendString(string(captureSecretHTML))
 	})
 
 	// POST handler to capture the secret and generate the one-time link.
 	app.Post("/", func(c *fiber.Ctx) error {
-		log.Printf("POST /")
+		log.Info("POST /")
 		secret := c.FormValue("secret")
 
 		if secret != "" {
-			log.Println("Secret provided")
+			log.Info("Secret provided")
 			apiURL := fmt.Sprintf("%s/secret", baseURL)
-			log.Printf("API URL: %s\n", apiURL)
+			log.Info("API URL: ", "url", apiURL)
 			jsonData := []byte(fmt.Sprintf(`{"secret":"%s"}`, secret))
 
 			var tr *http.Transport
@@ -77,20 +90,20 @@ func main() {
 				tr = &http.Transport{}
 			}
 
-			log.Print("Creating new HTTP client")
+			log.Info("Creating new HTTP client")
 			client := &http.Client{Transport: tr}
 			req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 			if err != nil {
-				log.Printf("Error creating new request: %v", err)
+				log.Error("Error during API call", "err", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 
-			log.Printf("Making API call")
+			log.Info("Making API call")
 			resp, err := client.Do(req)
 			if err != nil {
-				log.Printf("Error during API call: %v", err)
+				log.Error("Error during API call", "err", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 			}
 			defer resp.Body.Close()
@@ -99,7 +112,7 @@ func main() {
 				Key string `json:"key"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-				log.Printf("Error decoding API response: %v", err)
+				log.Error("Error during API call", "err", err)
 				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 			}
 
@@ -131,14 +144,14 @@ func main() {
 
 		req, err := http.NewRequest("GET", apiURL, nil)
 		if err != nil {
-			log.Printf("Error creating new request: %v", err)
+			log.Error("Error during API call", "err", err)
 			return displaySecretPage(c, "Error retrieving secret")
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
 
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("Error during API GET call: %v", err)
+			log.Error("Error during API call", "err", err)
 			return displaySecretPage(c, "Error retrieving secret")
 		}
 		defer resp.Body.Close()
@@ -159,7 +172,7 @@ func main() {
 		return displaySecretPage(c, apiResponse.Secret)
 	})
 
-	fmt.Printf("Starting server on :%s", uiHostPort)
+	log.Info("Starting server on:", "port", uiHostPort)
 	log.Fatal(app.Listen(fmt.Sprintf(":%s", uiHostPort)))
 }
 
@@ -168,7 +181,7 @@ func displaySecretPage(c *fiber.Ctx, content string) error {
 
 	displaySecretHTML, err := os.ReadFile("display_secret.html")
 	if err != nil {
-		log.Fatalf("Error reading display_secret.html: %v", err)
+		log.Error("Error during API call", "err", err)
 	}
 	html := fmt.Sprintf(string(displaySecretHTML), content)
 	c.Set("Content-Type", "text/html; charset=utf-8")
