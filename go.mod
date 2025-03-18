@@ -3,6 +3,7 @@ module github.com/squarehole/disapyr
 go 1.24.0
 
 require (
+	github.com/charmbracelet/log v0.4.1
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
@@ -17,7 +18,6 @@ require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/lipgloss v1.0.0 // indirect
-	github.com/charmbracelet/log v0.4.1 // indirect
 	github.com/charmbracelet/x/ansi v0.4.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
