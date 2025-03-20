@@ -1,3 +1,41 @@
+// Package main provides a CLI tool for securely storing and retrieving secrets
+// via an API server. The tool supports two main operations: storing a secret
+// and retrieving a secret using a key.
+//
+// Usage:
+//   - To store a secret:
+//     ./cli --store --secret="your-secret" --server="https://your-server-url"
+//   - To retrieve a secret:
+//     ./cli --retrieve --key="your-key" --server="https://your-server-url"
+//
+// Flags:
+//
+//	--store       Indicates that a secret should be stored.
+//	--retrieve    Indicates that a secret should be retrieved.
+//	--secret      The secret to store (used with --store).
+//	--key         The key to retrieve the secret (used with --retrieve).
+//	--server      The API server URL (default: https://localhost:3000).
+//
+// Environment Variables:
+//
+//	GO_ENV        If set to "production", TLS verification will be enforced.
+//	              Otherwise, TLS verification is bypassed for development.
+//
+// API Endpoints:
+//   - POST /secret: Stores a secret and returns a key.
+//   - GET /secret/:key: Retrieves a secret using the provided key.
+//
+// Error Handling:
+//   - The tool ensures that either --store or --retrieve is specified, but not both.
+//   - Input validation is performed for required flags (--secret for storing and --key for retrieving).
+//   - Errors from API calls or JSON processing are displayed, and the program exits with a non-zero status.
+//
+// Example:
+//
+//	To store a secret:
+//	  ./cli --store --secret="my-secret" --server="https://api.example.com"
+//	To retrieve a secret:
+//	  ./cli --retrieve --key="my-key" --server="https://api.example.com"
 package main
 
 import (
