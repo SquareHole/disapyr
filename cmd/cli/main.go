@@ -18,8 +18,9 @@
 //
 // Environment Variables:
 //
-//	GO_ENV        If set to "production", TLS verification will be enforced.
-//	              Otherwise, TLS verification is bypassed for development.
+//	GO_ENV           If set to "production", TLS verification will be enforced.
+//	CUSTOM_CA_CERT   Path to a custom CA certificate for development environments.
+//	                 If provided, this certificate will be used instead of bypassing TLS verification.
 //
 // API Endpoints:
 //   - POST /secret: Stores a secret and returns a key.
@@ -41,6 +42,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -69,6 +71,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create HTTP client with appropriate TLS configuration
+	client := createHTTPClient()
+
 	if *storeCmd {
 		// Validate input.
 		if *secretVal == "" {
@@ -84,15 +89,7 @@ func main() {
 			fmt.Println("Error marshalling JSON:", err)
 			os.Exit(1)
 		}
-		var tr *http.Transport
-		if os.Getenv("GO_ENV") != "production" {
-			tr = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Bypass TLS verification
-			}
-		} else {
-			tr = &http.Transport{}
-		}
-		client := &http.Client{Transport: tr}
+
 		resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 		if err != nil {
 			fmt.Println("Error calling API:", err)
@@ -121,7 +118,19 @@ func main() {
 
 		// Prepare and send a GET request to /secret/:key.
 		url := fmt.Sprintf("%s/secret/%s", *server, *keyVal)
-		resp, err := http.Get(url)
+
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Println("Error creating request:", err)
+			os.Exit(1)
+		}
+
+		// Get access token for authentication
+		// Note: This is a placeholder. In a real implementation, you would need to
+		// obtain an access token from Auth0 or another authentication provider.
+		// For now, we're just making an unauthenticated request.
+
+		resp, err := client.Do(req)
 		if err != nil {
 			fmt.Println("Error calling API:", err)
 			os.Exit(1)
@@ -141,4 +150,56 @@ func main() {
 		// Display the retrieved secret.
 		fmt.Printf("Retrieved secret: %s\n", body)
 	}
+}
+
+// createHTTPClient creates an HTTP client with appropriate TLS configuration
+func createHTTPClient() *http.Client {
+	var tr *http.Transport
+
+	// Check if we're in production mode
+	if os.Getenv("GO_ENV") == "production" {
+		// In production, use the default transport with standard TLS verification
+		tr = &http.Transport{}
+	} else {
+		// In development, check if a custom CA certificate is provided
+		customCACert := os.Getenv("CUSTOM_CA_CERT")
+		if customCACert != "" {
+			// Use the custom CA certificate
+			rootCAs, _ := x509.SystemCertPool()
+			if rootCAs == nil {
+				rootCAs = x509.NewCertPool()
+			}
+
+			// Read the custom CA certificate
+			caCert, err := os.ReadFile(customCACert)
+			if err != nil {
+				fmt.Printf("Warning: Could not read custom CA certificate: %v\n", err)
+				fmt.Println("Falling back to standard TLS verification")
+				tr = &http.Transport{}
+			} else {
+				// Add the custom CA certificate to the cert pool
+				if ok := rootCAs.AppendCertsFromPEM(caCert); !ok {
+					fmt.Println("Warning: Failed to append custom CA certificate to cert pool")
+					fmt.Println("Falling back to standard TLS verification")
+					tr = &http.Transport{}
+				} else {
+					// Use the custom CA certificate for TLS verification
+					tr = &http.Transport{
+						TLSClientConfig: &tls.Config{
+							RootCAs: rootCAs,
+						},
+					}
+					fmt.Println("Using custom CA certificate for TLS verification")
+				}
+			}
+		} else {
+			// No custom CA certificate provided, use standard TLS verification
+			// but print a warning
+			fmt.Println("Warning: No custom CA certificate provided for development environment")
+			fmt.Println("Using standard TLS verification. Set CUSTOM_CA_CERT environment variable to use a custom CA certificate")
+			tr = &http.Transport{}
+		}
+	}
+
+	return &http.Client{Transport: tr}
 }

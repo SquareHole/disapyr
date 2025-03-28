@@ -32,8 +32,7 @@ var handler = func(c *fiber.Ctx) error {
 	// Get the token from the Authorization header.
 	tokenString := c.Get("Authorization")
 	if tokenString == "" {
-		log.Warn("missing token")
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})
+		return HandleAuthError(c, "Missing authentication token", nil)
 	}
 
 	// Trim and remove "Bearer " prefix (case-insensitive) if present.
@@ -45,12 +44,19 @@ var handler = func(c *fiber.Ctx) error {
 	// Validate the token with Auth0.
 	auth0Domain := os.Getenv("URL")
 	if auth0Domain == "" {
-		log.Warn("Auth0 domain not set")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Auth0 domain not configured"})
+		return HandleServerError(c, "Auth0 domain not configured", nil)
 	}
-	log.Infof("Auth0 domain: %s", auth0Domain)
+
+	// Get the audience from environment variable
+	audience := os.Getenv("AUDIENCE")
+	if audience == "" {
+		return HandleServerError(c, "Audience not configured", nil)
+	}
+
+	log.Infof("Auth0 domain: %s, Audience: %s", auth0Domain, audience)
 	jwksURL := fmt.Sprintf("https://%s/.well-known/jwks.json", auth0Domain)
 
+	// Parse with audience and issuer validation
 	parsedToken, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Verify the signing method is RSA.
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
@@ -117,14 +123,50 @@ var handler = func(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
-		log.Errorf("invalid token: %v", err)
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
+		return HandleAuthError(c, "Invalid token", err)
 	}
 
 	// In jwt/v5 we need to explicitly check claims validity
 	if !parsedToken.Valid {
-		log.Warn("token validation failed")
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
+		return HandleAuthError(c, "Token validation failed", nil)
+	}
+
+	// Validate audience and issuer claims
+	claims := parsedToken.Claims.(jwt.MapClaims)
+
+	// Log the claims for debugging
+	log.Debugf("Token claims: %v", claims)
+
+	// Verify audience claim
+	tokenAud, ok := claims["aud"].(string)
+	if !ok {
+		// Handle case where aud is an array of strings
+		tokenAudArray, ok := claims["aud"].([]interface{})
+		if !ok {
+			return HandleAuthError(c, fmt.Sprintf("Invalid audience format: %v", claims["aud"]), nil)
+		}
+
+		// Check if audience is in the array
+		audFound := false
+		for _, aud := range tokenAudArray {
+			if audStr, ok := aud.(string); ok && audStr == audience {
+				audFound = true
+				break
+			}
+		}
+
+		if !audFound {
+			return HandleAuthError(c, fmt.Sprintf("Invalid audience: %v, expected: %s", tokenAudArray, audience), nil)
+		}
+	} else if tokenAud != audience {
+		return HandleAuthError(c, fmt.Sprintf("Invalid audience: %v, expected: %s", tokenAud, audience), nil)
+	}
+
+	// Verify issuer claim
+	expectedIssuer := fmt.Sprintf("https://%s/", auth0Domain)
+	tokenIss, ok := claims["iss"].(string)
+	if !ok || tokenIss != expectedIssuer {
+		return HandleAuthError(c, fmt.Sprintf("Invalid issuer: %v, expected: %s", claims["iss"], expectedIssuer), nil)
 	}
 
 	// Token is valid; proceed to the next handler.
@@ -188,6 +230,12 @@ func NewDatabaseConnection() (*sql.DB, error) {
 		return nil, fmt.Errorf("error connecting to database: %w", err)
 	}
 
+	// Configure connection pooling and timeouts
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
 	// Create the 'secrets' table if it does not exist.
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS secrets (
@@ -215,8 +263,7 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 		log.Infof("New secret request from %s", c.IP())
 		// Limit the number of requests.
 		if !limiter.Allow() {
-			log.Warnf("Too many requests from %v, limit: %v", c.IP(), limiter.Limit())
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
+			return HandleRateLimitError(c, fmt.Sprintf("Too many requests from %v, limit: %v", c.IP(), limiter.Limit()), nil)
 		}
 
 		type RequestBody struct {
@@ -224,10 +271,10 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 		}
 		var body RequestBody
 		if err := c.BodyParser(&body); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot parse JSON"})
+			return HandleValidationError(c, "Cannot parse JSON request body", err)
 		}
 		if body.Secret == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "secret is required"})
+			return HandleValidationError(c, "Secret is required", nil)
 		}
 
 		// Generate a unique key.
@@ -237,13 +284,13 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 			key = key[:keyLen]
 		}
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate key"})
+			return HandleServerError(c, "Failed to generate key", err)
 		}
 
 		// Insert the secret and key into the database.
 		_, err = db.Exec("INSERT INTO secrets(key, secret) VALUES($1, $2)", key, body.Secret)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to store secret"})
+			return HandleDatabaseError(c, "Failed to store secret in database", err)
 		}
 
 		return c.JSON(fiber.Map{"key": key})
@@ -253,7 +300,7 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 	app.Get("/secret/:key", handler, func(c *fiber.Ctx) error {
 		// Limit the number of requests.
 		if !limiter.Allow() {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "too many requests"})
+			return HandleRateLimitError(c, "Too many requests", nil)
 		}
 
 		key := c.Params("key")
@@ -261,11 +308,11 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 		// Start a transaction to ensure atomic read-update.
 		tx, err := db.Begin()
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to start transaction"})
+			return HandleDatabaseError(c, "Failed to start database transaction", err)
 		}
 		defer func() {
 			if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
-				log.Printf("failed to rollback transaction: %v", err)
+				log.Error("Failed to rollback transaction", "error", err)
 			}
 		}()
 
@@ -273,26 +320,26 @@ func RegisterRoutes(app *fiber.App, db *sql.DB, limiter *rate.Limiter, encKey st
 		var retrievedAt *time.Time
 		err = tx.QueryRow("SELECT secret, retrieved_at FROM secrets WHERE key = $1 FOR UPDATE", key).Scan(&secret, &retrievedAt)
 		if err == sql.ErrNoRows {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "secret not found"})
+			return HandleNotFoundError(c, fmt.Sprintf("Secret with key %s not found", key), nil)
 		} else if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to query secret"})
+			return HandleDatabaseError(c, "Failed to query secret from database", err)
 		}
 
 		// Check if the secret has already been retrieved.
 		if retrievedAt != nil || secret == "" {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "secret already retrieved"})
+			return HandleNotFoundError(c, "Secret already retrieved", nil)
 		}
 
 		// Clear the secret and record the retrieval time.
 		now := time.Now()
 		_, err = tx.Exec("UPDATE secrets SET secret = '', retrieved_at = $1 WHERE key = $2", now, key)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update secret"})
+			return HandleDatabaseError(c, "Failed to update secret in database", err)
 		}
 
 		// Commit the transaction.
 		if err = tx.Commit(); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to commit transaction"})
+			return HandleDatabaseError(c, "Failed to commit transaction", err)
 		}
 
 		// Return the original secret.

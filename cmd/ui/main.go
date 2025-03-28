@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -81,20 +82,13 @@ func main() {
 			log.Info("API URL: ", "url", apiURL)
 			jsonData := []byte(fmt.Sprintf(`{"secret":"%s"}`, secret))
 
-			var tr *http.Transport
-			if os.Getenv("GO_ENV") != "production" {
-				tr = &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Bypass TLS verification
-				}
-			} else {
-				tr = &http.Transport{}
-			}
+			// Create HTTP client with secure TLS configuration
+			client := createSecureHTTPClient()
 
 			log.Info("Creating new HTTP client")
-			client := &http.Client{Transport: tr}
 			req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 			if err != nil {
-				log.Error("Error during API call", "err", err)
+				log.Error("Error creating request", "err", err)
 				return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
 			}
 			req.Header.Set("Content-Type", "application/json")
@@ -112,7 +106,7 @@ func main() {
 				Key string `json:"key"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
-				log.Error("Error during API call", "err", err)
+				log.Error("Error decoding API response", "err", err)
 				return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 			}
 
@@ -131,20 +125,13 @@ func main() {
 	app.Get("/secret/:key", func(c *fiber.Ctx) error {
 		key := c.Params("key")
 		apiURL := fmt.Sprintf("%s/secret/%s", baseURL, key)
-		var tr *http.Transport
-		if os.Getenv("GO_ENV") != "production" {
-			tr = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Bypass TLS verification
-			}
-		} else {
-			tr = &http.Transport{}
-		}
 
-		client := &http.Client{Transport: tr}
+		// Create HTTP client with secure TLS configuration
+		client := createSecureHTTPClient()
 
 		req, err := http.NewRequest("GET", apiURL, nil)
 		if err != nil {
-			log.Error("Error during API call", "err", err)
+			log.Error("Error creating request", "err", err)
 			return displaySecretPage(c, "Error retrieving secret")
 		}
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
@@ -166,6 +153,7 @@ func main() {
 			Secret string `json:"secret"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+			log.Error("Error decoding API response", "err", err)
 			return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
 		}
 
@@ -178,12 +166,65 @@ func main() {
 
 // displaySecretPage renders an HTML page with a read-only textarea containing the provided content.
 func displaySecretPage(c *fiber.Ctx, content string) error {
-
 	displaySecretHTML, err := os.ReadFile("display_secret.html")
 	if err != nil {
-		log.Error("Error during API call", "err", err)
+		log.Error("Error reading display_secret.html", "err", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Error loading display template")
 	}
 	html := fmt.Sprintf(string(displaySecretHTML), content)
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(html)
+}
+
+// createSecureHTTPClient creates an HTTP client with secure TLS configuration
+func createSecureHTTPClient() *http.Client {
+	var tr *http.Transport
+
+	// Check if we're in production mode
+	if os.Getenv("GO_ENV") == "production" {
+		// In production, use the default transport with standard TLS verification
+		tr = &http.Transport{}
+		log.Info("Using production TLS configuration")
+	} else {
+		// In development, check if a custom CA certificate is provided
+		customCACert := os.Getenv("CUSTOM_CA_CERT")
+		if customCACert != "" {
+			// Use the custom CA certificate
+			rootCAs, _ := x509.SystemCertPool()
+			if rootCAs == nil {
+				rootCAs = x509.NewCertPool()
+			}
+
+			// Read the custom CA certificate
+			caCert, err := os.ReadFile(customCACert)
+			if err != nil {
+				log.Warn("Could not read custom CA certificate", "err", err)
+				log.Info("Falling back to standard TLS verification")
+				tr = &http.Transport{}
+			} else {
+				// Add the custom CA certificate to the cert pool
+				if ok := rootCAs.AppendCertsFromPEM(caCert); !ok {
+					log.Warn("Failed to append custom CA certificate to cert pool")
+					log.Info("Falling back to standard TLS verification")
+					tr = &http.Transport{}
+				} else {
+					// Use the custom CA certificate for TLS verification
+					tr = &http.Transport{
+						TLSClientConfig: &tls.Config{
+							RootCAs: rootCAs,
+						},
+					}
+					log.Info("Using custom CA certificate for TLS verification")
+				}
+			}
+		} else {
+			// No custom CA certificate provided, use standard TLS verification
+			// but log a warning
+			log.Warn("No custom CA certificate provided for development environment")
+			log.Info("Using standard TLS verification. Set CUSTOM_CA_CERT environment variable to use a custom CA certificate")
+			tr = &http.Transport{}
+		}
+	}
+
+	return &http.Client{Transport: tr}
 }
