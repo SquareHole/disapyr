@@ -18,3 +18,5 @@
 .vscode/
 .env
 /bin/
+.config/notes.md
+.config/san.cnf
